@@ -36,7 +36,8 @@ import {
   Loader2,
   Users,
   User,
-  Globe
+  Globe,
+  RefreshCw
 } from 'lucide-react';
 
 export default function App() {
@@ -65,6 +66,8 @@ export default function App() {
   const [books, setBooks] = useState<Book[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [firestoreLoadError, setFirestoreLoadError] = useState<string | null>(null);
+  const [isFirestoreLoading, setIsFirestoreLoading] = useState<boolean>(false);
 
   // App Global Theme Configuration
   const [isNightMode, setIsNightMode] = useState<boolean>(() => {
@@ -112,18 +115,75 @@ export default function App() {
     onConfirm: () => void;
   } | null>(null);
 
+  const syncBookshelf = async () => {
+    try {
+      const { fetchBooksListFromCloud, isFirebaseConfigured } = await import('./lib/firebase');
+      
+      if (isFirebaseConfigured) {
+        setIsFirestoreLoading(true);
+        setFirestoreLoadError(null);
+        console.log('[Library Sync] Firestore is configured. Loading books exclusively from cloud "books" collection...');
+        
+        try {
+          const cloudBooks = await fetchBooksListFromCloud();
+          if (cloudBooks && cloudBooks.length > 0) {
+            setBooks(cloudBooks);
+            setFirestoreLoadError(null);
+            try {
+              localStorage.setItem('datascience_bookshelf', JSON.stringify(cloudBooks));
+            } catch (_) {}
+          } else {
+            console.warn('[Library Sync] Loaded 0 documents from Firestore "books" collection.');
+            setBooks([]);
+            setFirestoreLoadError('No books loaded from Firestore. Your Cloud collection is empty. Use the seeding tool below.');
+          }
+        } catch (err: any) {
+          console.error('[Library Sync] Error fetching books from cloud collection:', err);
+          setBooks([]);
+          setFirestoreLoadError('No books loaded from Firestore. Check console for details.');
+        } finally {
+          setIsFirestoreLoading(false);
+        }
+      } else {
+        console.warn('[Library Sync] Firebase environment variables are missing.');
+        setBooks([]);
+        setFirestoreLoadError('Firebase environment variables are missing in the published app.');
+      }
+    } catch (err) {
+      console.error('[Library Sync] Static modules import error:', err);
+      setBooks([]);
+      setFirestoreLoadError('Firebase environment variables are missing in the published app.');
+    }
+  };
+
+  const [isSeeding, setIsSeeding] = useState<boolean>(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
+
+  const handleSeedBooks = async () => {
+    setIsSeeding(true);
+    setSeedError(null);
+    try {
+      const { saveBookMetadata } = await import('./lib/firebase');
+      
+      // Loop through SAMPLE_BOOKS and upload each one
+      for (const book of SAMPLE_BOOKS) {
+        console.log(`[Seed Database] Uploading book: "${book.title}"...`);
+        await saveBookMetadata(book);
+      }
+      
+      console.log('[Seed Database] Seeding completed successfully. Re-syncing library...');
+      await syncBookshelf();
+    } catch (err: any) {
+      console.error('[Seed Database] Seeding failed:', err);
+      setSeedError(err.message || String(err));
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   // Initialize books catalog and categories list from LocalStorage, falling back to defaults
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('datascience_bookshelf');
-      let initialBooks = SAMPLE_BOOKS;
-      if (stored) {
-        initialBooks = JSON.parse(stored);
-      } else {
-        localStorage.setItem('datascience_bookshelf', JSON.stringify(SAMPLE_BOOKS));
-      }
-      setBooks(initialBooks);
-
       const storedCats = localStorage.getItem('datascience_categories2');
       if (storedCats) {
         const parsed = JSON.parse(storedCats) as string[];
@@ -134,39 +194,10 @@ export default function App() {
         localStorage.setItem('datascience_categories2', JSON.stringify(sorted));
       }
 
-      // Live Cloud Firestore catalog synchronization
-      const syncCloudCatalog = async () => {
-        try {
-          const { fetchBooksListFromCloud, isFirebaseConfigured } = await import('./lib/firebase');
-          if (isFirebaseConfigured) {
-            const cloudBooks = await fetchBooksListFromCloud();
-            if (cloudBooks.length > 0) {
-              setBooks(prev => {
-                const combined = [...prev];
-                cloudBooks.forEach(cb => {
-                  const idx = combined.findIndex(b => b.id === cb.id);
-                  if (idx !== -1) {
-                    combined[idx] = cb;
-                  } else {
-                    combined.unshift(cb);
-                  }
-                });
-                try {
-                  localStorage.setItem('datascience_bookshelf', JSON.stringify(combined));
-                } catch (_) {}
-                return combined;
-              });
-            }
-          }
-        } catch (err) {
-          console.error('[Library Sync] Cloud matching error:', err);
-        }
-      };
-
-      syncCloudCatalog();
+      syncBookshelf();
     } catch (e) {
       console.warn('LocalStorage not available, falling back to memory states.', e);
-      setBooks(SAMPLE_BOOKS);
+      setBooks([]);
       setCategories([...CATEGORIES].sort((a, b) => a.localeCompare(b)));
     }
   }, []);
@@ -808,6 +839,65 @@ export default function App() {
             </section>
 
             {/* 3. SHELF CAROUSELS GRID CANVAS */}
+            {isFirestoreLoading && (
+              <div className="bg-amber-50/50 border border-amber-250 rounded-xl p-8 text-center shadow-2xs flex flex-col items-center justify-center space-y-2 mb-6 animate-pulse">
+                <Loader2 className="w-8 h-8 text-amber-600 animate-spin" />
+                <p className="text-sm font-extrabold text-amber-900 font-sans">Connecting to Firestore Catalog Database...</p>
+                <p className="text-xs text-slate-500 max-w-md">Retrieving live textbook assets and metadata documents from the centralized Cloud repository.</p>
+              </div>
+            )}
+
+            {firestoreLoadError && (
+              <div 
+                id="firestore-error-banner" 
+                className="bg-amber-50/90 dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl p-8 text-center shadow-lg flex flex-col items-center justify-center space-y-4 mb-6 animate-in fade-in slide-in-from-top-4 duration-300"
+              >
+                <div className="w-14 h-14 bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-1 border border-amber-200 dark:border-amber-900">
+                  <ShieldAlert className="w-7 h-7" />
+                </div>
+                <h3 className="text-sm font-extrabold text-amber-900 dark:text-amber-100 uppercase tracking-wider">Cloud Catalog Empty or Unreachable</h3>
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 font-sans max-w-lg leading-relaxed bg-white/90 dark:bg-slate-950 border border-amber-100/50 dark:border-slate-800 rounded-lg p-4 shadow-sm">
+                  “No books loaded from Firestore. Check console for details.”
+                  <span className="block mt-1.5 font-normal text-[11px] text-slate-500">
+                    If this is a newly provisioned sandbox, your Cloud collection is currently empty. You can instantly bootstrap the textbook catalog database below.
+                  </span>
+                </p>
+                
+                {/* Administrative or Sandbox Seeding Control */}
+                <div className="flex flex-col items-center gap-2 bg-white/60 dark:bg-slate-950 p-4 border border-amber-100 dark:border-slate-800 rounded-xl max-w-md w-full shadow-2xs">
+                  <div className="text-[10px] text-slate-550 dark:text-slate-450 font-mono flex flex-col gap-1 text-center font-semibold">
+                    <span>Target Database Collection: <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-amber-600 font-bold">books</code></span>
+                    <span>Status: <span className="text-amber-600 font-bold">Connected • Empty Catalog Standby</span></span>
+                  </div>
+
+                  {isSeeding ? (
+                    <button 
+                      disabled
+                      className="w-full mt-2 cursor-not-allowed inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-amber-600/50 text-white text-xs font-bold rounded-lg transition"
+                    >
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Bootstrapping Textbook Catalog...
+                    </button>
+                  ) : (
+                    <div className="w-full flex flex-col gap-2 mt-2">
+                      <button 
+                        onClick={handleSeedBooks}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition shadow-md active:translate-y-px cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Seed Default Books to Firestore Collection
+                      </button>
+                    </div>
+                  )}
+                  {seedError && (
+                    <p className="text-[10px] text-rose-500 font-mono mt-1 text-center font-bold">
+                      Seeding Error: {seedError}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {filteredBooks.length > 0 ? (
               <div className="space-y-2 bg-white rounded-xl border border-slate-100 p-6 shadow-sm">
                 

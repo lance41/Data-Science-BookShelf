@@ -6,7 +6,7 @@
 import React, { useState, useRef } from 'react';
 import { Book, BookCategory } from '../types';
 import { Upload, X, FileText, Check, AlertCircle, Sparkles, FolderPlus } from 'lucide-react';
-import { uploadBookFile, saveBookMetadata } from '../lib/firebase';
+import { uploadBookFile, saveBookMetadata, auth } from '../lib/firebase';
 
 interface BookUploadProps {
   onAddBook: (newBook: Book) => void;
@@ -374,7 +374,10 @@ export default function BookUpload({ onAddBook, onClose, categories, onAddCatego
         pageCount: Number(pageCount) || 250,
         isFavorite: false,
         progress: 0,
-        notes: []
+        notes: [],
+        createdBy: auth?.currentUser?.displayName || undefined,
+        createdByEmail: auth?.currentUser?.email || undefined,
+        userId: auth?.currentUser?.uid || undefined
       };
 
       // Set explicit Firestore and coverImageUrl mapping

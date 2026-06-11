@@ -21,7 +21,10 @@
         "pageCount": { "type": "integer" },
         "isFavorite": { "type": "boolean" },
         "progress": { "type": "integer" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "createdByEmail": { "type": "string" },
+        "userId": { "type": "string" }
       },
       "required": ["id", "title", "authors", "fileUrl", "fileType", "category"]
     },

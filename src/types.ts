@@ -29,6 +29,9 @@ export interface Book {
   bookmarks?: BookBookmark[];
   coverImageUrl?: string;
   createdAt?: string;
+  createdBy?: string;
+  createdByEmail?: string;
+  userId?: string;
   userProgress?: { [userId: string]: number };
   userPages?: { [userId: string]: number };
 }

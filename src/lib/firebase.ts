@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -26,13 +27,30 @@ import {
 } from 'firebase/auth';
 import { Book } from '../types';
 
-import firebaseConfig from '../../firebase-applet-config.json';
+// The Firebase config should be:
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+};
 
-// Check if any config parameter is present
+// Add safe console logs showing whether each env variable exists, but do not print the actual API key.
+console.log('[Firebase Init] Checking environment variables:');
+console.log(' - VITE_FIREBASE_API_KEY exists:', !!import.meta.env.VITE_FIREBASE_API_KEY);
+console.log(' - VITE_FIREBASE_AUTH_DOMAIN exists:', !!import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ? `(${import.meta.env.VITE_FIREBASE_AUTH_DOMAIN})` : '(missing)');
+console.log(' - VITE_FIREBASE_PROJECT_ID exists:', !!import.meta.env.VITE_FIREBASE_PROJECT_ID, import.meta.env.VITE_FIREBASE_PROJECT_ID ? `(${import.meta.env.VITE_FIREBASE_PROJECT_ID})` : '(missing)');
+console.log(' - VITE_FIREBASE_STORAGE_BUCKET exists:', !!import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ? `(${import.meta.env.VITE_FIREBASE_STORAGE_BUCKET})` : '(missing)');
+console.log(' - VITE_FIREBASE_MESSAGING_SENDER_ID exists:', !!import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ? `(${import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID})` : '(missing)');
+console.log(' - VITE_FIREBASE_APP_ID exists:', !!import.meta.env.VITE_FIREBASE_APP_ID, import.meta.env.VITE_FIREBASE_APP_ID ? `(${import.meta.env.VITE_FIREBASE_APP_ID})` : '(missing)');
+
+// Check if any config parameter is present (do not require measurementId, check required fields)
 export const isFirebaseConfigured = !!(
-  firebaseConfig.apiKey &&
-  firebaseConfig.projectId &&
-  firebaseConfig.storageBucket
+  import.meta.env.VITE_FIREBASE_API_KEY &&
+  import.meta.env.VITE_FIREBASE_PROJECT_ID &&
+  import.meta.env.VITE_FIREBASE_APP_ID
 );
 
 let app: any = null;
@@ -42,11 +60,29 @@ export let auth: any = null;
 
 if (isFirebaseConfigured) {
   try {
+    // Initialize Firebase app only once.
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-    storage = getStorage(app);
+    
+    // Initialize Firestore using getFirestore(app).
+    db = getFirestore(app);
+    // Initialize Auth using getAuth(app).
     auth = getAuth(app);
+    // Initialize Storage using getStorage(app).
+    storage = getStorage(app);
+    
     console.log('[Firebase] Successfully initialized custom project cloud database, auth, and storage services.');
+
+    // After Firebase initializes, query the Firestore collection named exactly "books" and log the number of books loaded.
+    getDocs(collection(db, 'books'))
+      .then(snapshot => {
+        console.log(`[Firebase Startup Verification] Successfully queried "books" collection. Loaded ${snapshot.size} books.`);
+        snapshot.forEach(doc => {
+          console.log(`   - Book document ID: "${doc.id}", title: "${doc.data().title || 'Untitled'}"`);
+        });
+      })
+      .catch(err => {
+        console.error('[Firebase Startup Verification] Error loading from "books" collection:', err);
+      });
   } catch (err) {
     console.error('[Firebase] Lazy initialization error:', err);
   }
@@ -306,18 +342,66 @@ export async function deleteBookFromStorage(book: Book): Promise<void> {
  * Fetch all custom books from database and return
  */
 export async function fetchBooksListFromCloud(): Promise<Book[]> {
+  const collectionName = 'books';
+  console.log(`[Firebase Firestore] Initializing fetchBooksListFromCloud. Firebase Project ID: "${firebaseConfig.projectId}", Firestore collection: "${collectionName}"`);
+  
   if (isFirebaseConfigured && db) {
     try {
-      console.log('[Firebase Firestore] Loading custom uploads from cloud db...');
-      const snapshot = await getDocs(collection(db, 'books'));
+      console.log(`[Firebase Firestore] Querying all documents from collection: "${collectionName}"...`);
+      const snapshot = await getDocs(collection(db, collectionName));
       const books: Book[] = [];
+      
       snapshot.forEach(doc => {
-        books.push(doc.data() as Book);
+        const data = doc.data();
+        const bookTitle = data.title || 'Untitled Book';
+        console.log(`[Firebase Firestore] Book Loaded -> ID: "${doc.id}", Title: "${bookTitle}"`);
+        
+        // Provide defaults for older or incomplete book records
+        const sanitizedBook: Book = {
+          title: bookTitle,
+          authors: Array.isArray(data.authors) ? data.authors : (data.author ? [data.author] : ['Unknown Author']),
+          publisher: data.publisher || 'Unknown Publisher',
+          year: typeof data.year === 'number' ? data.year : new Date().getFullYear(),
+          category: data.category || 'Data Science Basics',
+          coverImage: data.coverImage || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=300',
+          coverColor: data.coverColor || '#f59e0b',
+          fileUrl: data.fileUrl || '',
+          fileType: data.fileType || 'pdf',
+          description: data.description || 'No description provided.',
+          summary: data.summary || {
+            overview: data.description || 'No overview provided.',
+            targetAudience: 'General audience',
+            entryPrerequisites: 'None',
+            learningPath: ['Begin reading to build foundational knowledge.']
+          },
+          keyTopics: Array.isArray(data.keyTopics) ? data.keyTopics : ['General'],
+          pageCount: typeof data.pageCount === 'number' ? data.pageCount : 100,
+          isFavorite: !!data.isFavorite,
+          progress: typeof data.progress === 'number' ? data.progress : 0,
+          notes: Array.isArray(data.notes) ? data.notes : [],
+          bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
+          createdAt: data.createdAt || new Date().toISOString(),
+          createdBy: data.createdBy || undefined,
+          createdByEmail: data.createdByEmail || undefined,
+          userId: data.userId || undefined,
+          userProgress: data.userProgress || {},
+          userPages: data.userPages || {},
+          ...data, // Preserve other custom properties
+          id: doc.id // Enforce snapshot document ID
+        };
+        
+        books.push(sanitizedBook);
       });
+      
+      console.log(`[Firebase Firestore] Query Success! Query fetched ${books.length} documents from "${collectionName}" in project "${firebaseConfig.projectId}".`);
       return books;
     } catch (err) {
-      console.error('[Firebase] Failed to fetch documents:', err);
+      console.error(`[Firebase Firestore] Query Error in collection "${collectionName}" on Firebase Project "${firebaseConfig.projectId}":`, err);
+      throw err;
     }
+  } else {
+    const errorMsg = `Firebase has not been configured or Firestore database is null. Project ID: "${firebaseConfig.projectId}"`;
+    console.warn(`[Firebase Firestore] ${errorMsg}`);
+    throw new Error(errorMsg);
   }
-  return [];
 }
