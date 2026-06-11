@@ -1,0 +1,6 @@
+{
+  "name": "Data Science BookShelf",
+  "description": "A personal digital library for your data science books in PDF and EPUB format, featuring horizontal shelves, metadata details, book summaries, and embedded visual reading support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

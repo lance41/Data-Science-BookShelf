@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/* Night mode / Dark mode global definitions */
+html.dark,
+.dark {
+  background-color: #080c14 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Override background colors of the main container, navbar, footer, modals and panels */
+.dark div.min-h-screen {
+  background-color: #080c14 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark header {
+  background-color: rgba(17, 24, 39, 0.9) !important;
+  border-color: #1e293b !important;
+}
+
+.dark footer {
+  background-color: #0c111d !important;
+  border-color: #1e293b !important;
+  color: #94a3b8 !important;
+}
+
+/* Cards & primary widgets - excluding reader view and its children */
+.dark .bg-white:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #111827 !important;
+  border-color: #242f41 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .bg-slate-50:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #162032 !important;
+  border-color: #242f41 !important;
+}
+
+.dark .text-slate-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-slate-900:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-slate-800:not(#read-book-reader-view, #read-book-reader-view *) {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-700:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-slate-600:not(#read-book-reader-view, #read-book-reader-view *) {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-slate-500:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-slate-400:not(#read-book-reader-view, #read-book-reader-view *) {
+  color: #94a3b8 !important;
+}
+
+.dark .border-slate-100:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .border-slate-200:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .border-slate-200\/60:not(#read-book-reader-view, #read-book-reader-view *) {
+  border-color: #242f41 !important;
+}
+
+/* Form element overrides */
+.dark input[type="text"]:not(#read-book-reader-view, #read-book-reader-view *),
+.dark input[type="search"]:not(#read-book-reader-view, #read-book-reader-view *),
+.dark input[type="url"]:not(#read-book-reader-view, #read-book-reader-view *),
+.dark input[type="number"]:not(#read-book-reader-view, #read-book-reader-view *),
+.dark textarea:not(#read-book-reader-view, #read-book-reader-view *),
+.dark select:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #162032 !important;
+  color: #f8fafc !important;
+  border-color: #2d3d52 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Category ribbon & filters */
+.dark .bg-amber-50:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: rgba(217, 119, 6, 0.15) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(217, 119, 6, 0.3) !important;
+}
+
+.dark .text-amber-700:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-amber-600:not(#read-book-reader-view, #read-book-reader-view *) {
+  color: #fbbf24 !important;
+}
+
+.dark .hover\:bg-slate-50:hover:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #1e293b !important;
+}
+
+.dark .hover\:bg-slate-100\/75:hover:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-slate-100:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-color: #1e293b !important;
+}
+
+/* Scrollbars */
+.dark ::-webkit-scrollbar-track {
+  background: #080c14;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+/* Classy Horizontal Scrollbars */
+.classy-scrollbar::-webkit-scrollbar {
+  height: 6px; /* Slightly thicker for premium visibility while retaining elegant profile */
+  width: 6px;
+}
+
+.classy-scrollbar::-webkit-scrollbar-track {
+  background: transparent; /* No background boundary */
+}
+
+.classy-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8; /* Enhanced visibility slate gray for light theme */
+  border-radius: 9999px;
+  border: none;
+}
+
+.classy-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.dark .classy-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155; /* Higher-contrast slate-accent for night mode */
+  border-radius: 9999px;
+}
+
+.dark .classy-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569; /* Extra clear indicator on cursor focus */
+}
+
+/* Subtle dashboard gradient container styling overrides */
+.dark .bg-gradient-to-br:not(#read-book-reader-view, #read-book-reader-view *) {
+  background-image: none !important;
+  background-color: #111827 !important;
+  border-color: #242f41 !important;
+}
+
+.dark .text-amber-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-rose-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-emerald-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-blue-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-sky-950:not(#read-book-reader-view, #read-book-reader-view *),
+.dark .text-purple-950:not(#read-book-reader-view, #read-book-reader-view *) {
+  color: #f8fafc !important;
+}
+
+/* Specific Dialog Modals */
+.dark .shadow-xl {
+  background-color: #101726 !important;
+  border-color: #242f41 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5) !important;
+}

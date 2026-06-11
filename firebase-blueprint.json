@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Book": {
+      "title": "Book",
+      "description": "Represents a textbook, research paper, or EPUB inside the bookshelf catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "authors": { "type": "array" },
+        "publisher": { "type": "string" },
+        "year": { "type": "integer" },
+        "category": { "type": "string" },
+        "coverImage": { "type": "string" },
+        "coverColor": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileType": { "type": "string" },
+        "description": { "type": "string" },
+        "summary": { "type": "object" },
+        "keyTopics": { "type": "array" },
+        "pageCount": { "type": "integer" },
+        "isFavorite": { "type": "boolean" },
+        "progress": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "authors", "fileUrl", "fileType", "category"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents an authenticated digital library member profile with role assignments.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "viewer"] },
+        "libraryAccess": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "libraryAccess"]
+    },
+    "AccessRequest": {
+      "title": "AccessRequest",
+      "description": "Represents a library access request waiting for administrative review.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "displayName": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "denied"] },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "reviewedBy": { "type": "string" },
+        "reviewedByEmail": { "type": "string" }
+      },
+      "required": ["uid", "userEmail", "reason", "status", "requestedAt"]
+    }
+  },
+  "firestore": {
+    "books/{bookId}": {
+      "schema": "Book",
+      "description": "Collection of all metadata records of digitized textbooks."
+    },
+    "users/{uid}": {
+      "schema": "User",
+      "description": "Collection of restricted user profile logs and role metrics."
+    },
+    "accessRequests/{requestId}": {
+      "schema": "AccessRequest",
+      "description": "Collection of request records submitted by Viewers requesting copyrighted books authorization."
+    }
+  }
+}

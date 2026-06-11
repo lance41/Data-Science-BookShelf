@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Rules for books collection
+    match /books/{bookId} {
+      allow read: if true; // Everyone can browse book metadata
+
+      allow create: if (
+        isAdmin() && 
+        isValidBook(request.resource.data)
+      );
+
+      allow update: if (
+        (isAdmin() || isApprovedViewer()) && 
+        isValidBook(request.resource.data)
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // Rules for users collection
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid && 
+        isValidUser(request.resource.data) && (
+          // Standard users get viewer role and false libraryAccess
+          (request.resource.data.email.toLowerCase() != 'adiemus80@gmail.com' && request.resource.data.role == 'viewer' && request.resource.data.libraryAccess == false) ||
+          // Hardcoded email gets admin role and true libraryAccess
+          (request.resource.data.email.toLowerCase() == 'adiemus80@gmail.com' && request.resource.data.role == 'admin' && request.resource.data.libraryAccess == true)
+        )
+      );
+
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          request.auth.uid == uid && 
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL'])
+        )
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // Rules for accessRequests collection
+    match /accessRequests/{requestId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || (
+          exists(/databases/$(database)/documents/accessRequests/$(requestId)) &&
+          get(/databases/$(database)/documents/accessRequests/$(requestId)).data.uid == request.auth.uid
+        )
+      );
+
+      allow create: if isSignedIn() && (
+        request.resource.data.uid == request.auth.uid &&
+        isValidRequest(request.resource.data) &&
+        request.resource.data.status == 'pending'
+      );
+
+      allow update: if isAdmin() && isValidRequest(request.resource.data);
+
+      allow delete: if isAdmin();
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// HELPER FUNCTIONS & VALIDATIONS
+// -------------------------------------------------------------
+
+function isSignedIn() {
+  return request.auth != null;
+}
+
+function getUserData(uid) {
+  return get(/databases/$(database)/documents/users/$(uid)).data;
+}
+
+function isAdmin() {
+  return isSignedIn() && (
+    request.auth.token.email.toLowerCase() == 'adiemus80@gmail.com' ||
+    (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData(request.auth.uid).role == 'admin')
+  );
+}
+
+function isApprovedViewer() {
+  return isSignedIn() && (
+    exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+    getUserData(request.auth.uid).libraryAccess == true
+  );
+}
+
+function isValidBook(book) {
+  return (
+    book.id is string &&
+    book.id.size() <= 128 &&
+    book.title is string &&
+    book.title.size() <= 256 &&
+    book.category is string &&
+    book.category.size() <= 128 &&
+    book.fileType is string &&
+    book.fileType.matches('^(pdf|epub)$') &&
+    book.fileUrl is string &&
+    book.fileUrl.size() <= 2048 &&
+    (!('publisher' in book) || (book.publisher is string && book.publisher.size() <= 128)) &&
+    (!('pageCount' in book) || (book.pageCount is int || book.pageCount is float)) &&
+    (!('year' in book) || (book.year is int || book.year is float)) &&
+    (!('coverImage' in book) || (book.coverImage is string && book.coverImage.size() <= 2048)) &&
+    (!('coverColor' in book) || (book.coverColor is string && book.coverColor.size() <= 256))
+  );
+}
+
+function isValidUser(userData) {
+  return (
+    userData.uid is string &&
+    userData.uid.size() <= 128 &&
+    userData.email is string &&
+    userData.email.size() <= 256 &&
+    userData.displayName is string &&
+    userData.displayName.size() <= 256 &&
+    userData.photoURL is string &&
+    userData.photoURL.size() <= 2048 &&
+    userData.role is string &&
+    userData.role.matches('^(admin|viewer)$') &&
+    userData.libraryAccess is bool
+  );
+}
+
+function isValidRequest(req) {
+  return (
+    req.uid is string &&
+    req.uid.size() <= 128 &&
+    req.userEmail is string &&
+    req.userEmail.size() <= 256 &&
+    req.displayName is string &&
+    req.displayName.size() <= 256 &&
+    req.reason is string &&
+    req.reason.size() <= 5000 &&
+    req.status is string &&
+    req.status.matches('^(pending|approved|denied)$')
+  );
+}
