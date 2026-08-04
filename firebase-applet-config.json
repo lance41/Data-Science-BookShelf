@@ -1,10 +1,10 @@
 {
-  "projectId": "enter your own projectId",
-  "appId": "enter your own appId",
-  "apiKey": "enter your own apiKey",
-  "authDomain": "enter your own authDomain",
-  "firestoreDatabaseId": "enter your own firestoreDatabaseId",
-  "storageBucket": "enter your own storageBucket",
-  "messagingSenderId": "enter your own messagingSenderId",
+  "projectId": "gen-lang-client-0923267134",
+  "appId": "1:1046003580749:web:81a689257298a1ee7e8104",
+  "apiKey": "AIzaSyCBLs_SIeoZHdQ8fJF6hc3caa5qDYdSijw",
+  "authDomain": "gen-lang-client-0923267134.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-441c57b7-8a06-4675-aac0-c7fd422c08f2",
+  "storageBucket": "gen-lang-client-0923267134.firebasestorage.app",
+  "messagingSenderId": "1046003580749",
   "measurementId": ""
 }

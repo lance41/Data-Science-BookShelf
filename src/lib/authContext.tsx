@@ -4,7 +4,6 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocs,
   collection, 
   onSnapshot,
   serverTimestamp,
@@ -34,7 +33,7 @@ export interface AppUser {
 
 export function isSimulatedUser(user: AppUser | null): boolean {
   if (!user) return false;
-  return user.uid.startsWith('sim_') || user.uid === 'admin_uid' || user.uid === 'user_bob';
+  return user.uid.startsWith('sim_') || user.uid === 'admin_uid' || user.uid === 'user_bob' || user.uid === 'user_alice';
 }
 
 export interface AccessRequest {
@@ -75,15 +74,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [allRequests, setAllRequests] = useState<AccessRequest[]>([]);
   const [allUsersList, setAllUsersList] = useState<AppUser[]>([]);
 
+  // Debug log initialization state
+  useEffect(() => {
+    console.log('[Firebase Auth Log] Firebase Authentication active:', isFirebaseConfigured);
+  }, []);
+
   // -------------------------------------------------------------
-  // FIRESTORE REALTIME SYNC LISTENERS (FOR ADMIN DASHBOARD)
+  // FIRESTORE REALTIME SYNC LISTENERS (FOR ADMIN DASHBOARD & LISTS)
   // -------------------------------------------------------------
   useEffect(() => {
     if (!isFirebaseConfigured || !db || !user || user.role !== 'admin' || isSimulatedUser(user)) {
-      setAllRequests([]);
-      setAllUsersList([]);
+      if (isFirebaseConfigured && (!user || user.role !== 'admin')) {
+        setAllRequests([]);
+        setAllUsersList([]);
+      }
       return;
     }
+
+    console.log('[Firebase Auth Log] Setting up realtime listeners for accessRequests and users collections...');
 
     // Realtime requests feed
     const unsubRequests = onSnapshot(collection(db, 'accessRequests'), (snapshot) => {
@@ -100,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       reqs.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
       setAllRequests(reqs);
     }, (error) => {
-      console.error('[AuthContext] Firestore onSnapshot requests error: ', error);
+      console.error('[Firebase Auth Log] Firestore onSnapshot accessRequests error:', error.code || error, error.message || '');
     });
 
     // Realtime users feed
@@ -117,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       setAllUsersList(usrs);
     }, (error) => {
-      console.error('[AuthContext] Firestore onSnapshot users error: ', error);
+      console.error('[Firebase Auth Log] Firestore onSnapshot users error:', error.code || error, error.message || '');
     });
 
     return () => {
@@ -127,20 +135,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   // -------------------------------------------------------------
-  // SIMULATOR REALTIME LISTENERS / SYNC (FALLBACK STATE MANAGEMENT)
+  // LOCAL SIMULATION FALLBACK (ONLY RUNS WHEN FIREBASE IS NOT CONFIGURED)
   // -------------------------------------------------------------
   useEffect(() => {
-    if (isFirebaseConfigured && !isSimulatedUser(user)) return;
+    if (isFirebaseConfigured) {
+      // STRICT REQUIREMENT: When Firebase is configured, do not load datascience_sim_users
+      // or datascience_sim_requests or show Bob/Alice sample users.
+      return;
+    }
 
-    // Periodically sync or initialize local lists
     const loadSimulatedData = () => {
-      // Load users
       const storedUsers = localStorage.getItem('datascience_sim_users');
       let localUsers: AppUser[] = [];
       if (storedUsers) {
         localUsers = JSON.parse(storedUsers);
       } else {
-        // Default list with some test users
         localUsers = [
           {
             uid: 'admin_uid',
@@ -177,7 +186,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setAllUsersList(localUsers);
 
-      // Load requests
       const storedReqs = localStorage.getItem('datascience_sim_requests');
       let localReqs: AccessRequest[] = [];
       if (storedReqs) {
@@ -200,89 +208,110 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     loadSimulatedData();
-
-    // Setup an interval to sync simulated records
     const interval = setInterval(loadSimulatedData, 4000);
     return () => clearInterval(interval);
   }, [user]);
 
-  // Handle system boot check
+  // -------------------------------------------------------------
+  // FIREBASE ONAUTHSTATECHANGED AUTHENTICATION LISTENER
+  // -------------------------------------------------------------
   useEffect(() => {
     if (isFirebaseConfigured && auth) {
+      console.log('[Firebase Auth Log] Listening to Firebase onAuthStateChanged...');
+      
       const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
-        try {
-          if (fbUser) {
-            // User is signed in with Firebase Auth. Synch in firestore.
+        const userPresent = !!fbUser;
+        console.log('[Firebase Auth Log] onAuthStateChanged user present:', userPresent);
+
+        if (fbUser) {
+          console.log('[Firebase Auth Log] Firebase authenticated UID:', fbUser.uid);
+          console.log('[Firebase Auth Log] Firebase authenticated email:', fbUser.email);
+
+          try {
             const userRef = doc(db, 'users', fbUser.uid);
             const userSnap = await getDoc(userRef);
-            
-            const isUserAdmin = fbUser.email?.toLowerCase() === 'adiemus80@gmail.com';
-            
-            let appUser: AppUser;
+
+            const userEmail = (fbUser.email || '').trim().toLowerCase();
+            const isUserAdmin = userEmail === 'adiemus80@gmail.com';
+
             if (userSnap.exists()) {
               const existingData = userSnap.data();
-              appUser = {
-                uid: fbUser.uid,
-                email: fbUser.email || '',
-                displayName: fbUser.displayName || 'Anonymous',
-                photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
-                role: existingData.role || (isUserAdmin ? 'admin' : 'viewer'),
-                libraryAccess: existingData.libraryAccess !== undefined ? existingData.libraryAccess : (isUserAdmin ? true : false),
-                createdAt: existingData.createdAt || serverTimestamp(),
-                lastLogin: serverTimestamp()
+              console.log('[Firebase Auth Log] Firestore user profile loaded for UID:', fbUser.uid);
+
+              const role: 'admin' | 'viewer' = isUserAdmin ? 'admin' : (existingData.role || 'viewer');
+              // Preserve existing viewer's libraryAccess value during later sign-ins
+              const libraryAccess: boolean = isUserAdmin 
+                ? true 
+                : (existingData.libraryAccess !== undefined ? existingData.libraryAccess : false);
+
+              const updatePayload: any = {
+                lastLogin: serverTimestamp(),
+                displayName: fbUser.displayName || existingData.displayName || 'Google User',
+                photoURL: fbUser.photoURL || existingData.photoURL || ''
               };
-              // Update last login
-              await updateDoc(userRef, { lastLogin: serverTimestamp() });
-            } else {
-              appUser = {
+
+              if (isUserAdmin) {
+                updatePayload.role = 'admin';
+                updatePayload.libraryAccess = true;
+              }
+
+              await updateDoc(userRef, updatePayload);
+              console.log('[Firebase Auth Log] Updated lastLogin timestamp in Firestore users/', fbUser.uid);
+
+              setUser({
                 uid: fbUser.uid,
                 email: fbUser.email || '',
-                displayName: fbUser.displayName || 'Anonymous',
-                photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
+                displayName: fbUser.displayName || existingData.displayName || 'Google User',
+                photoURL: fbUser.photoURL || existingData.photoURL || '',
+                role,
+                libraryAccess,
+                createdAt: existingData.createdAt,
+                lastLogin: new Date().toISOString()
+              });
+            } else {
+              console.log('[Firebase Auth Log] Creating new Firestore user profile at users/', fbUser.uid);
+              const newProfile = {
+                uid: fbUser.uid,
+                email: fbUser.email || '',
+                displayName: fbUser.displayName || 'Google User',
+                photoURL: fbUser.photoURL || '',
                 role: isUserAdmin ? 'admin' : 'viewer',
                 libraryAccess: isUserAdmin ? true : false,
                 createdAt: serverTimestamp(),
                 lastLogin: serverTimestamp()
               };
-              await setDoc(userRef, appUser);
-            }
-            
-            // Re-fetch clean fields
-            const finalSnap = await getDoc(userRef);
-            if (finalSnap.exists()) {
-              const cleanedData = finalSnap.data();
+
+              await setDoc(userRef, newProfile);
+              console.log('[Firebase Auth Log] Firestore user profile created successfully!');
+
               setUser({
                 uid: fbUser.uid,
                 email: fbUser.email || '',
-                displayName: fbUser.displayName || 'Anonymous',
-                photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
-                role: cleanedData.role as 'admin' | 'viewer',
-                libraryAccess: cleanedData.libraryAccess,
-                createdAt: cleanedData.createdAt,
-                lastLogin: cleanedData.lastLogin
+                displayName: fbUser.displayName || 'Google User',
+                photoURL: fbUser.photoURL || '',
+                role: isUserAdmin ? 'admin' : 'viewer',
+                libraryAccess: isUserAdmin ? true : false,
+                createdAt: new Date().toISOString(),
+                lastLogin: new Date().toISOString()
               });
             }
-          } else {
-            const storedUser = localStorage.getItem('datascience_auth_user');
-            if (storedUser) {
-              try {
-                setUser(JSON.parse(storedUser));
-              } catch (_) {
-                setUser(null);
-              }
-            } else {
-              setUser(null);
-            }
+          } catch (err: any) {
+            console.error('[Firebase Auth Log] Error syncing user profile with Firestore:', err.code || err, err.message || '');
+            setUser(null);
+          } finally {
+            setLoading(false);
           }
-        } catch (error) {
-          console.error('[AuthContext] Auth listener error:', error);
-        } finally {
+        } else {
+          console.log('[Firebase Auth Log] No active Firebase Auth session. Setting user to null.');
+          // Do NOT restore any user from localStorage when Firebase is configured!
+          setUser(null);
           setLoading(false);
         }
       });
+
       return unsubscribe;
     } else {
-      // Simulated Session Recovery
+      // Non-Firebase environment fallback
       try {
         const storedUser = localStorage.getItem('datascience_auth_user');
         if (storedUser) {
@@ -299,28 +328,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // -------------------------------------------------------------
-  // USER ACTIONS
+  // USER AUTHENTICATION ACTIONS
   // -------------------------------------------------------------
   const signInWithGoogle = async (simulateEmail?: string, simulateName?: string) => {
     setLoading(true);
-    if (isFirebaseConfigured && auth && !simulateEmail) {
+    if (isFirebaseConfigured && auth) {
+      // ALWAYS use real Firebase Auth in production / Firebase configured mode
       try {
+        console.log('[Firebase Auth Log] Starting Google sign-in popup...');
         const provider = new GoogleAuthProvider();
-        await signInWithPopup(auth, provider);
-      } catch (error) {
-        console.error('[AuthContext] Google Signin Failed:', error);
+        provider.setCustomParameters({
+          prompt: 'select_account'
+        });
+
+        const result = await signInWithPopup(auth, provider);
+        console.log('[Firebase Auth Log] Google sign-in succeeded!');
+        console.log(' - Firebase authenticated UID:', result.user.uid);
+        console.log(' - Firebase authenticated email:', result.user.email);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] Authentication error code:', error.code || 'unknown', 'message:', error.message || error);
         throw error;
       } finally {
         setLoading(false);
       }
     } else {
-      // Simulate Google Sign-In with popup
+      // Simulated sign-in for non-Firebase local environment only
       try {
         const targetEmail = simulateEmail || 'user@example.com';
         const targetName = simulateName || 'Data Explorer';
         const isUserAdmin = targetEmail.toLowerCase() === 'adiemus80@gmail.com';
         
-        // Recover user state or create new
         const storedUsers = localStorage.getItem('datascience_sim_users');
         let currentUsers: AppUser[] = storedUsers ? JSON.parse(storedUsers) : [];
         let existingUser = currentUsers.find(u => u.email.toLowerCase() === targetEmail.toLowerCase());
@@ -330,18 +367,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           existingUser.lastLogin = new Date().toISOString();
           simulatedProfile = existingUser;
         } else {
-          const isAlice = targetEmail.toLowerCase() === 'alice@example.com';
           simulatedProfile = {
             uid: `sim_${Date.now()}`,
             email: targetEmail,
             displayName: targetName,
-            photoURL: targetEmail.toLowerCase() === 'adiemus80@gmail.com'
-              ? 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&auto=format&fit=crop&q=80'
-              : (isAlice 
-                  ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80'
-                  : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80'),
+            photoURL: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
             role: isUserAdmin ? 'admin' : 'viewer',
-            libraryAccess: isUserAdmin ? true : (isAlice ? true : false),
+            libraryAccess: isUserAdmin ? true : false,
             createdAt: new Date().toISOString(),
             lastLogin: new Date().toISOString()
           };
@@ -361,19 +393,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     setLoading(true);
-    if (isFirebaseConfigured && auth) {
-      try {
+    try {
+      if (isFirebaseConfigured && auth) {
         await signOut(auth);
-        localStorage.removeItem('datascience_auth_user');
-        setUser(null);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+        console.log('[Firebase Auth Log] Signed out successfully from Firebase Auth.');
       }
-    } else {
+      // Remove obsolete/simulated auth localStorage keys
       localStorage.removeItem('datascience_auth_user');
+      localStorage.removeItem('datascience_sim_users');
+      localStorage.removeItem('datascience_sim_requests');
       setUser(null);
+    } catch (err: any) {
+      console.error('[Firebase Auth Log] Sign out error:', err.code || err, err.message || '');
+    } finally {
       setLoading(false);
     }
   };
@@ -395,12 +427,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           reviewedByEmail: null
         };
         await addDoc(collection(db, 'accessRequests'), reqData);
-      } catch (error) {
-        console.error('[AuthContext] Submit access request error:', error);
+        console.log('[Firebase Auth Log] Access request submitted to Firestore accessRequests');
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] Submit access request error:', error.code || error, error.message || '');
         throw error;
       }
     } else {
-      // Simulated Access Request creation
       const storedReqs = localStorage.getItem('datascience_sim_requests');
       const reqs: AccessRequest[] = storedReqs ? JSON.parse(storedReqs) : [];
       
@@ -422,7 +454,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const getMyRequests = async (): Promise<AccessRequest[]> => {
     if (!user) return [];
     if (isFirebaseConfigured && db && !isSimulatedUser(user)) {
-      // In firestore, we will query from our current in-memory feed or query once
       return allRequests.filter(r => r.uid === user.uid);
     } else {
       const storedReqs = localStorage.getItem('datascience_sim_requests');
@@ -439,7 +470,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (isFirebaseConfigured && db && !isSimulatedUser(user)) {
       try {
-        // 1. Update accessRequest
         const reqRef = doc(db, 'accessRequests', requestId);
         await updateDoc(reqRef, {
           status: 'approved',
@@ -448,19 +478,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           reviewedByEmail: user.email
         });
 
-        // 2. Grant library access to target user
         const targetUserRef = doc(db, 'users', targetUid);
         await updateDoc(targetUserRef, {
           libraryAccess: true
         });
 
-        console.log(`[Admin Auths] Approved request ${requestId} for uid ${targetUid}`);
-      } catch (error) {
-        console.error('[AuthContext] approveRequest error:', error);
+        console.log(`[Firebase Auth Log] Approved request ${requestId} for targetUid ${targetUid}`);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] approveRequest error:', error.code || error, error.message || '');
         throw error;
       }
     } else {
-      // Simulated
       const storedReqs = localStorage.getItem('datascience_sim_requests');
       let reqs: AccessRequest[] = storedReqs ? JSON.parse(storedReqs) : [];
       reqs = reqs.map(r => r.id === requestId ? {
@@ -473,18 +501,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('datascience_sim_requests', JSON.stringify(reqs));
       setAllRequests(reqs);
 
-      // Update user libraryAccess
       const storedUsers = localStorage.getItem('datascience_sim_users');
       let currentUsers: AppUser[] = storedUsers ? JSON.parse(storedUsers) : [];
       currentUsers = currentUsers.map(u => u.uid === targetUid ? { ...u, libraryAccess: true } : u);
       localStorage.setItem('datascience_sim_users', JSON.stringify(currentUsers));
       setAllUsersList(currentUsers);
       
-      // If target user is current user, sync immediately!
       if (user.uid === targetUid) {
         const updatedSelf = { ...user, libraryAccess: true };
         setUser(updatedSelf);
-        localStorage.setItem('datascience_auth_user', JSON.stringify(updatedSelf));
       }
     }
   };
@@ -501,12 +526,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           reviewedBy: user.uid,
           reviewedByEmail: user.email
         });
-      } catch (error) {
-        console.error('[AuthContext] denyRequest error:', error);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] denyRequest error:', error.code || error, error.message || '');
         throw error;
       }
     } else {
-      // Simulated
       const storedReqs = localStorage.getItem('datascience_sim_requests');
       let reqs: AccessRequest[] = storedReqs ? JSON.parse(storedReqs) : [];
       reqs = reqs.map(r => r.id === requestId ? {
@@ -530,8 +554,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await updateDoc(targetUserRef, {
           libraryAccess: true
         });
-      } catch (error) {
-        console.error('[AuthContext] grantAccessDirectly error:', error);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] grantAccessDirectly error:', error.code || error, error.message || '');
         throw error;
       }
     } else {
@@ -544,7 +568,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (user.uid === targetUid) {
         const updatedSelf = { ...user, libraryAccess: true };
         setUser(updatedSelf);
-        localStorage.setItem('datascience_auth_user', JSON.stringify(updatedSelf));
       }
     }
   };
@@ -558,8 +581,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await updateDoc(targetUserRef, {
           libraryAccess: false
         });
-      } catch (error) {
-        console.error('[AuthContext] revokeAccessDirectly error:', error);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] revokeAccessDirectly error:', error.code || error, error.message || '');
         throw error;
       }
     } else {
@@ -572,7 +595,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (user.uid === targetUid) {
         const updatedSelf = { ...user, libraryAccess: false };
         setUser(updatedSelf);
-        localStorage.setItem('datascience_auth_user', JSON.stringify(updatedSelf));
       }
     }
   };
@@ -580,7 +602,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = async (displayName: string, photoURL: string) => {
     if (!user) throw new Error('Must be logged in to update profile.');
 
-    // 1. Update in Firestore if Firebase configured and not a simulated user
     if (isFirebaseConfigured && db && !isSimulatedUser(user)) {
       try {
         const userRef = doc(db, 'users', user.uid);
@@ -588,25 +609,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           displayName,
           photoURL
         });
-      } catch (error) {
-        console.error('[AuthContext] Update profile error:', error);
+      } catch (error: any) {
+        console.error('[Firebase Auth Log] Update profile error:', error.code || error, error.message || '');
         throw error;
       }
     }
 
-    // 2. Synchronize in simulated user storage if needed
-    const storedUsers = localStorage.getItem('datascience_sim_users');
-    let currentUsers: AppUser[] = storedUsers ? JSON.parse(storedUsers) : [];
-    if (currentUsers.some(u => u.uid === user.uid)) {
-      currentUsers = currentUsers.map(u => u.uid === user.uid ? { ...u, displayName, photoURL } : u);
-      localStorage.setItem('datascience_sim_users', JSON.stringify(currentUsers));
-      setAllUsersList(currentUsers);
-    }
-
-    // 3. Update current user state
     const updatedSelf = { ...user, displayName, photoURL };
     setUser(updatedSelf);
-    localStorage.setItem('datascience_auth_user', JSON.stringify(updatedSelf));
   };
 
   return (

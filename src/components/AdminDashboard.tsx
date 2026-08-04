@@ -38,10 +38,8 @@ export default function AdminDashboard({ booksCount, categoriesCount }: AdminDas
   // -------------------------------------------------------------
   // CALCULATE DETAILED STATS
   // -------------------------------------------------------------
-  const totalUsers = allUsersList.length;
-  // Fallback to local simulation standard counts if zero
-  const totalUsersCount = totalUsers || 2; 
-  const approvedUsersCount = allUsersList.filter(u => u.libraryAccess).length || 1;
+  const totalUsersCount = allUsersList.length; 
+  const approvedUsersCount = allUsersList.filter(u => u.libraryAccess).length;
   const pendingRequestsCount = allRequests.filter(r => r.status === 'pending').length;
   const totalStorageApprox = (booksCount * 3.4).toFixed(1); // 3.4 MB average size
 
