@@ -16,7 +16,7 @@ service cloud.firestore {
       );
 
       allow update: if (
-        (isAdmin() || isApprovedViewer()) && 
+        isAdmin() && 
         isValidBook(request.resource.data)
       );
 
@@ -95,6 +95,16 @@ function isApprovedViewer() {
   );
 }
 
+function isValidStoragePath(path, bookId) {
+  return path is string &&
+    path.size() <= 500 &&
+    path.matches('^books/' + bookId + '/.+') &&
+    !path.matches('^https?://.*') &&
+    !path.matches('.*\\?.*') &&
+    !path.matches('.*token=.*') &&
+    !path.matches('.*\\.\\..*');
+}
+
 function isValidBook(book) {
   return (
     book.id is string &&
@@ -105,8 +115,8 @@ function isValidBook(book) {
     book.category.size() <= 128 &&
     book.fileType is string &&
     book.fileType.matches('^(pdf|epub)$') &&
-    book.fileUrl is string &&
-    book.fileUrl.size() <= 2048 &&
+    isValidStoragePath(book.storagePath, book.id) &&
+    (!('fileUrl' in book) || (book.fileUrl is string && book.fileUrl.size() <= 2048)) &&
     (!('publisher' in book) || (book.publisher is string && book.publisher.size() <= 128)) &&
     (!('pageCount' in book) || (book.pageCount is int || book.pageCount is float)) &&
     (!('year' in book) || (book.year is int || book.year is float)) &&

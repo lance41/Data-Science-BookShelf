@@ -6,7 +6,7 @@
 import React, { useState, useRef } from 'react';
 import { Book, BookCategory } from '../types';
 import { Upload, X, FileText, Check, AlertCircle, Sparkles, FolderPlus } from 'lucide-react';
-import { uploadBookFile, saveBookMetadata, auth } from '../lib/firebase';
+import { uploadBookFile, uploadBookProtectedFile, saveBookMetadata, auth } from '../lib/firebase';
 
 interface BookUploadProps {
   onAddBook: (newBook: Book) => void;
@@ -327,14 +327,12 @@ export default function BookUpload({ onAddBook, onClose, categories, onAddCatego
     try {
       const bookId = `custom-${Date.now()}`;
 
-      // 1. Upload Book File
-      let finalFileUrl = 'https://arxiv.org/pdf/2203.01044.pdf';
+      // 1. Upload Protected Book File
+      let finalStoragePath: string | undefined = undefined;
       if (selectedFile) {
-        setSubmitStatus(`Storing library file (${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)...`);
-        const ext = selectedFile.name.split('.').pop()?.toLowerCase() || 'pdf';
-        
-        // Save the file (to Storage if configured, else IndexedDB)
-        finalFileUrl = await uploadBookFile(bookId, selectedFile, ext, fileType);
+        setSubmitStatus(`Storing protected file (${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)...`);
+        const uploadRes = await uploadBookProtectedFile(bookId, selectedFile, selectedFile.name, fileType);
+        finalStoragePath = uploadRes.storagePath;
       }
 
       // 2. Upload Cover Artwork
@@ -345,7 +343,7 @@ export default function BookUpload({ onAddBook, onClose, categories, onAddCatego
         finalCoverImage = await uploadBookFile(bookId, selectedCoverFile, ext, 'cover');
       }
 
-      // 3. Assemble book catalog record
+      // 3. Assemble book catalog record (storagePath stored, NO protected fileUrl written for new uploads)
       const newBook: Book = {
         id: bookId,
         title,
@@ -354,7 +352,7 @@ export default function BookUpload({ onAddBook, onClose, categories, onAddCatego
         year: Number(year) || new Date().getFullYear(),
         category,
         coverImage: finalCoverImage || '',
-        fileUrl: finalFileUrl,
+        storagePath: finalStoragePath,
         fileType,
         description: description || `Personal upload of ${title} in standard ${fileType.toUpperCase()} format.`,
         summary: {

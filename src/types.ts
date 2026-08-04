@@ -7,28 +7,31 @@ export interface Book {
   id: string;
   title: string;
   authors: string[];
-  publisher: string;
-  year: number;
+  publisher?: string;
+  year?: number;
+  publishedYear?: string | number;
   category: BookCategory;
-  coverImage: string; // fallback Unsplash photo or custom gradient info
+  coverImage?: string; // fallback Unsplash photo or custom gradient info
   coverColor?: string; // Hex or CSS gradient for the custom bookshelf generator
-  fileUrl: string;
+  fileUrl?: string; // Legacy URL retained for rollback compatibility
+  storagePath?: string; // Firebase Storage object path (e.g. books/custom-123/book.pdf)
   fileType: 'pdf' | 'epub';
-  description: string;
-  summary: {
+  description?: string;
+  summary?: {
     overview: string;
     targetAudience: string;
     entryPrerequisites: string;
     learningPath: string[];
-  };
-  keyTopics: string[];
-  pageCount: number;
+  } | string;
+  keyTopics?: string[];
+  pageCount?: number;
   isFavorite?: boolean;
   progress?: number; // Reading progress 0 to 100
   notes?: BookNote[];
   bookmarks?: BookBookmark[];
   coverImageUrl?: string;
   createdAt?: string;
+  updatedAt?: string;
   createdBy?: string;
   createdByEmail?: string;
   userId?: string;

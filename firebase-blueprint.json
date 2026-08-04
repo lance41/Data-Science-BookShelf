@@ -13,7 +13,8 @@
         "category": { "type": "string" },
         "coverImage": { "type": "string" },
         "coverColor": { "type": "string" },
-        "fileUrl": { "type": "string" },
+        "fileUrl": { "type": "string", "description": "Legacy file URL retained for rollback compatibility. Direct protected URLs must not be persisted for new uploads." },
+        "storagePath": { "type": "string", "description": "Protected Firebase Storage relative object reference path (books/{bookId}/{fileName}). Direct protected URLs must not be persisted." },
         "fileType": { "type": "string" },
         "description": { "type": "string" },
         "summary": { "type": "object" },
@@ -26,7 +27,7 @@
         "createdByEmail": { "type": "string" },
         "userId": { "type": "string" }
       },
-      "required": ["id", "title", "authors", "fileUrl", "fileType", "category"]
+      "required": ["id", "title", "authors", "storagePath", "fileType", "category"]
     },
     "User": {
       "title": "User",

@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import JSZip from 'jszip';
 import { Book, BookNote, BookBookmark, CATEGORIES } from '../types';
 import { ArrowLeft, BookOpen, Clock, FileText, Globe, Star, Plus, Trash2, Calendar, Share2, Layers, Milestone, ExternalLink, AlertTriangle, Play, ChevronLeft, ChevronRight, Edit2, Check, X, Upload, Bookmark, Hourglass, ShieldAlert } from 'lucide-react';
-import { resolveBookFileUrl, uploadBookFile } from '../lib/firebase';
+import { resolveBookFileUrl, uploadBookFile, getProtectedFileObjectUrl, replaceBookFile, validateStoragePath, deriveStoragePathFromUrl, uploadBookProtectedFile } from '../lib/firebase';
 import { useAuth } from '../lib/authContext';
 
 interface BookDetailsProps {
@@ -53,7 +53,7 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
   const currentChapterIndex = Math.min(2, Math.floor(((currentPage - 1) / book.pageCount) * 3));
 
   // Asset dynamic resolution states for local offline support
-  const [resolvedFileUrl, setResolvedFileUrl] = useState<string>(book.fileUrl);
+  const [resolvedFileUrl, setResolvedFileUrl] = useState<string>('');
   const [resolvedCoverImage, setResolvedCoverImage] = useState<string>(book.coverImage || '');
   const [isEpubStarted, setIsEpubStarted] = useState(false);
   const [iframeError, setIframeError] = useState(false);
@@ -84,7 +84,12 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
   const [editYear, setEditYear] = useState<number>(book.year);
   const [editPageCount, setEditPageCount] = useState<number>(book.pageCount);
   const [editFileType, setEditFileType] = useState<'pdf' | 'epub'>(book.fileType);
-  const [editFileUrl, setEditFileUrl] = useState(book.fileUrl);
+
+  // File replacement and load error states
+  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
+  const [replacingFile, setReplacingFile] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [replaceSuccess, setReplaceSuccess] = useState(false);
 
   useEffect(() => {
     setEditTitle(book.title);
@@ -94,7 +99,6 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
     setEditYear(book.year);
     setEditPageCount(book.pageCount);
     setEditFileType(book.fileType);
-    setEditFileUrl(book.fileUrl);
   }, [book]);
 
   const handleSaveSpecs = (e?: React.FormEvent) => {
@@ -108,12 +112,42 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
       year: Number(editYear),
       pageCount: Number(editPageCount),
       fileType: editFileType,
-      fileUrl: editFileUrl.trim(),
     };
 
     onUpdateBook(updated);
     setIsEditingSpecs(false);
-    setResolvedFileUrl(updated.fileUrl);
+  };
+
+  const handleReplaceBookFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (user?.role !== 'admin') return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setReplacingFile(true);
+    setReplaceError(null);
+    setReplaceSuccess(false);
+
+    try {
+      const { storagePath: newStoragePath, fileType: newFileType, warning } = await replaceBookFile(book, file);
+      const updatedBook: Book = {
+        ...book,
+        storagePath: newStoragePath,
+        fileType: newFileType,
+        updatedAt: new Date().toISOString()
+      };
+      onUpdateBook(updatedBook);
+      if (warning) {
+        setReplaceError(warning);
+      }
+      setReplaceSuccess(true);
+    } catch (err: any) {
+      console.error('[BookDetails] Replace book file error:', err);
+      setReplaceError(err?.message || 'Failed to replace book file.');
+    } finally {
+      setReplacingFile(false);
+      // Reset input
+      e.target.value = '';
+    }
   };
 
   const [coverUploading, setCoverUploading] = useState(false);
@@ -525,24 +559,94 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
 
     const resolveAllAssets = async () => {
       try {
-        // Resolve dynamic book file pdf/epub path
-        const fileRes = await resolveBookFileUrl(book.fileUrl);
-        if (isMounted) {
-          setResolvedFileUrl(fileRes.url);
-          fileCleanup = fileRes.cleanup;
+        setResolvedFileUrl('');
+        setFileLoadError(null);
+
+        const isAuthorized = user?.libraryAccess || user?.role === 'admin';
+
+        if (isAuthorized) {
+          if (book.storagePath) {
+            try {
+              const res = await getProtectedFileObjectUrl(book.storagePath);
+              if (isMounted) {
+                setResolvedFileUrl(res.url);
+                fileCleanup = res.cleanup;
+              } else {
+                res.cleanup();
+              }
+            } catch (err: any) {
+              console.warn('[BookDetails] Failed resolving blob for storagePath:', err);
+              if (isMounted) setFileLoadError(err?.message || 'Failed to load protected book file.');
+
+              // Fallback to legacy fileUrl if storagePath failed and fileUrl is available
+              if (book.fileUrl) {
+                if (book.fileUrl.startsWith('idxdb://')) {
+                  const fallbackRes = await resolveBookFileUrl(book.fileUrl);
+                  if (isMounted) {
+                    setResolvedFileUrl(fallbackRes.url);
+                    fileCleanup = fallbackRes.cleanup;
+                    setFileLoadError(null);
+                  } else {
+                    fallbackRes.cleanup?.();
+                  }
+                } else {
+                  const derivedPath = deriveStoragePathFromUrl(book.fileUrl);
+                  if (derivedPath) {
+                    try {
+                      const fallbackRes = await getProtectedFileObjectUrl(derivedPath);
+                      if (isMounted) {
+                        setResolvedFileUrl(fallbackRes.url);
+                        fileCleanup = fallbackRes.cleanup;
+                        setFileLoadError(null);
+                      } else {
+                        fallbackRes.cleanup();
+                      }
+                    } catch (_) {}
+                  }
+                }
+              }
+            }
+          } else if (book.fileUrl) {
+            if (book.fileUrl.startsWith('idxdb://')) {
+              const fileRes = await resolveBookFileUrl(book.fileUrl);
+              if (isMounted) {
+                setResolvedFileUrl(fileRes.url);
+                fileCleanup = fileRes.cleanup;
+              } else {
+                fileRes.cleanup?.();
+              }
+            } else {
+              const derivedPath = deriveStoragePathFromUrl(book.fileUrl);
+              if (derivedPath) {
+                try {
+                  const res = await getProtectedFileObjectUrl(derivedPath);
+                  if (isMounted) {
+                    setResolvedFileUrl(res.url);
+                    fileCleanup = res.cleanup;
+                  } else {
+                    res.cleanup();
+                  }
+                } catch (err: any) {
+                  if (isMounted) setFileLoadError(err?.message || 'Failed to load protected book file.');
+                }
+              }
+            }
+          }
         }
 
-        // Resolve cover if it's stored locally
+        // Resolve cover if it's stored locally or in Storage
         if (book.coverImage) {
           const coverRes = await resolveBookFileUrl(book.coverImage);
           if (isMounted) {
             setResolvedCoverImage(coverRes.url);
             coverCleanup = coverRes.cleanup;
+          } else {
+            coverRes.cleanup?.();
           }
         } else {
           if (isMounted) setResolvedCoverImage('');
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('[BookDetails] Asset resolution error:', err);
       }
     };
@@ -564,7 +668,20 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
       if (fileCleanup) fileCleanup();
       if (coverCleanup) coverCleanup();
     };
-  }, [book.fileUrl, book.coverImage, user?.uid, book.id]);
+  }, [book.fileUrl, book.storagePath, book.coverImage, user?.libraryAccess, user?.role, user?.uid, book.id]);
+
+  // Helper to safely access summary object fields
+  const summaryObj = typeof book.summary === 'object' && book.summary !== null ? book.summary : {
+    overview: typeof book.summary === 'string' ? book.summary : book.description || 'No overview provided.',
+    targetAudience: 'Systems practitioners, researchers, and data science model developers.',
+    entryPrerequisites: 'Standard introductory computing and algebra mathematics.',
+    learningPath: [
+      `Familiarize with the core structural architecture of ${book.category}`,
+      'Deep dive into theoretical mechanisms and algorithms',
+      'Optimize performance parameters',
+      'Deploy resilient systems.'
+    ]
+  };
 
   // Dynamic syllabus & textbook chapters generator based on selected book metadata
   const getDynamicChapters = (b: Book) => {
@@ -583,7 +700,7 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
       },
       {
         title: chapter2Title,
-        content: `Continuing our study of "${b.title}", we transition into ${topics[1] || 'advanced tactical mechanics'}.\n\nHere, our principal focus shifts to practical server and mathematical constraints: computational latency bounds, caching policies, communication overhead, and resource bottlenecks.\n\nBy leveraging the advanced methodologies highlighted in ${topics[1] || 'this chapter'}, practitioners can build resilient, high-integrity workflows. We analyze live performance indicators, optimize execution paths, and implement error-correcting patterns to handle data drift.\n\nKey Concepts Syllabus Reference:\n${b.summary?.learningPath?.map((item, idx) => `• 0${idx + 1}. ${item}`).join('\n') || '• Master foundational constructs\n• Implement sample use-cases'}`
+        content: `Continuing our study of "${b.title}", we transition into ${topics[1] || 'advanced tactical mechanics'}.\n\nHere, our principal focus shifts to practical server and mathematical constraints: computational latency bounds, caching policies, communication overhead, and resource bottlenecks.\n\nBy leveraging the advanced methodologies highlighted in ${topics[1] || 'this chapter'}, practitioners can build resilient, high-integrity workflows. We analyze live performance indicators, optimize execution paths, and implement error-correcting patterns to handle data drift.\n\nKey Concepts Syllabus Reference:\n${summaryObj.learningPath.map((item, idx) => `• 0${idx + 1}. ${item}`).join('\n')}`
       },
       {
         title: chapter3Title,
@@ -1060,7 +1177,6 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
                           setEditYear(book.year);
                           setEditPageCount(book.pageCount);
                           setEditFileType(book.fileType);
-                          setEditFileUrl(book.fileUrl);
                         }}
                         className="flex items-center gap-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition px-3 py-1.5 rounded-lg cursor-pointer"
                       >
@@ -1106,10 +1222,14 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
                         <td className="py-2.5 font-semibold text-slate-800">File Type</td>
                         <td className="py-2.5 font-semibold text-slate-700 uppercase">{book.fileType}</td>
                       </tr>
-                      <tr className="hover:bg-slate-50/50">
-                        <td className="py-2.5 font-semibold text-slate-800">File Source URL</td>
-                        <td className="py-2.5 font-mono text-[11px] text-slate-500 truncate max-w-[400px]" title={book.fileUrl}>{book.fileUrl}</td>
-                      </tr>
+                      {user?.role === 'admin' && (
+                        <tr className="hover:bg-slate-50/50">
+                          <td className="py-2.5 font-semibold text-slate-800">Storage Path (Admin)</td>
+                          <td className="py-2.5 font-mono text-[11px] text-slate-600 select-all font-bold">
+                            {book.storagePath || (book.fileUrl ? deriveStoragePathFromUrl(book.fileUrl) : 'None')}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 ) : (
@@ -1193,19 +1313,52 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
                         </select>
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="block font-bold text-slate-700">File Source URL</label>
-                        <input
-                          type="text"
-                          required
-                          value={editFileUrl}
-                          onChange={(e) => setEditFileUrl(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 bg-white font-mono text-[11px]"
-                        />
-                      </div>
-
                     </div>
                   </form>
+                )}
+
+                {/* Replace Book File Workflow (Admin Only) */}
+                {user?.role === 'admin' && (
+                  <div className="mt-6 pt-4 border-t border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5 text-amber-600" />
+                          Replace Book File (Admin Only)
+                        </h4>
+                        <p className="text-[11px] text-slate-500">Upload a new PDF or EPUB file to replace the current book file in Firebase Storage.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="file"
+                        accept=".pdf, .epub"
+                        onChange={handleReplaceBookFile}
+                        disabled={replacingFile}
+                        className="text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 cursor-pointer"
+                      />
+                      {replacingFile && (
+                        <div className="flex items-center gap-2 text-xs font-semibold text-amber-600">
+                          <div className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                          <span>Uploading replacement file...</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {replaceError && (
+                      <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium">
+                        {replaceError}
+                      </div>
+                    )}
+
+                    {replaceSuccess && (
+                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 font-semibold flex items-center gap-1.5">
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span>Book file successfully replaced! Metadata updated.</span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -1223,14 +1376,14 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
                     Book Synopsis & Core Concepts
                   </h3>
                   <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                    {book.summary.overview}
+                    {summaryObj.overview}
                   </p>
                 </div>
 
                 <div className="space-y-2.5">
                   <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Suggested Reading syllabus</h4>
                   <div className="space-y-2">
-                    {book.summary.learningPath.map((step, idx) => (
+                    {summaryObj.learningPath.map((step, idx) => (
                       <div key={idx} className="flex gap-3 text-xs text-slate-600 leading-relaxed font-sans items-start">
                         <span className="w-5 h-5 bg-amber-50 text-amber-700 font-bold font-mono text-[10px] border border-amber-100 rounded flex items-center justify-center mt-0.5 shrink-0">
                           0{idx + 1}
@@ -1252,13 +1405,13 @@ export default function BookDetails({ book, onBack, onUpdateBook, onDeleteBook }
                     Prerequisites
                   </span>
                   <p className="text-xs text-slate-700 font-medium leading-normal">
-                    {book.summary.entryPrerequisites}
+                    {summaryObj.entryPrerequisites}
                   </p>
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block pt-2 border-t border-slate-50">
                     Who is this for?
                   </span>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    {book.summary.targetAudience}
+                    {summaryObj.targetAudience}
                   </p>
                 </div>
 

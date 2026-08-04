@@ -95,6 +95,7 @@ export default function EditProfileModal({ user, isOpen, onClose, onUpdateProfil
 
     const uploadPromise = (async () => {
       const snapshot = await uploadBytes(storageRef, blob, { contentType: 'image/webp' });
+      // Public profile avatar image URL resolution only (getDownloadURL is restricted to public assets)
       return await getDownloadURL(snapshot.ref);
     })();
 
